@@ -133,7 +133,7 @@ predict_stock_open_value <- function(ShareName = "Share1",lag=3)
   #initialize weights for NN
   theta_list <- nse_stock_neural_net(lagged_data_matrix,theta1,theta2,minOpen,maxOpen,actualOpen,1,1,0.01)
   
-  for (n in 1:100)
+  for (n in 1:10000)
   {
     theta_list <- nse_stock_neural_net(lagged_data_matrix,theta_list[[1]],theta_list[[2]],minOpen,maxOpen,actualOpen,0,1,0.01)
     
