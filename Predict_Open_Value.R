@@ -1,5 +1,6 @@
 library(gdata)
 library(dplyr)
+library(DataCombine)
 
 setwd("C:/Users/prtomar/Documents/Data Hackathon")
 
@@ -7,42 +8,97 @@ con <- file("stock.log")
 sink(con, append=TRUE)
 sink(con, append=TRUE, type="message")
 
-
-
 rawdata1 = read.csv("HackathonRound1.csv")
 rawdata2 = read.csv("updatedData.csv")
 rawdata = rbind(rawdata1,rawdata2)
 
-predict_stock_open_value <- function(ShareName = "Share1",lag=3)
-{  
-      
-      share1_data_frame = rawdata %>% 
-        select(Share.Names,Date,Prev.Close,High.Price,Low.Price,Last.Price,Close.Price,Average.Price,
-               Total.Traded.Quantity,Turnover.in.Lacs,Deliverable.Qty,X..Dly.Qt.to.Traded.Qty,Open.Price) %>% 
-        filter(Share.Names == ShareName)
-      
-      
-      share1_data_frame_numeric = share1_data_frame %>% 
-        select(Prev.Close,High.Price,Low.Price,Last.Price,Close.Price,Average.Price,
-               Total.Traded.Quantity,Turnover.in.Lacs,Deliverable.Qty,X..Dly.Qt.to.Traded.Qty,Open.Price)
-      
-      maxOpen = as.vector(share1_data_frame_numeric %>% 
-                            mutate(m = max(Open.Price)) %>% 
-                            select(m) %>% 
-                            slice(1),mode="numeric")
-      
-      
-      minOpen = as.vector(share1_data_frame_numeric %>% 
-                            mutate(m = min(Open.Price)) %>% 
-                            select(m) %>% 
-                            slice(1),mode="numeric")
-      
-      actualOpen = as.vector(share1_data_frame_numeric %>% 
-                               select(Open.Price))
-      
-      
-      share1_data_scaled = share1_data_frame_numeric %>% 
+nse_stock_neural_net <- function(data_vars,theta1,theta2,init_w = 0, learn = 0, alpha = 0.01)
+      {
+        h_values = rep(0,nrow(data_vars))
         
+        if(init_w == 1)
+        {
+          theta1 = matrix(runif(55,-1,1),5,11)          
+          theta2 = matrix(runif(6,-1,1),1,6)                    
+        }   
+        
+        t1_DELTA = matrix(0,nrow(theta1),ncol(theta1))
+        t2_DELTA = matrix(0,nrow(theta2),ncol(theta2))
+                
+        m = 0
+        J = 0.0
+                      
+        tan_sigmoid <- function(x)
+        {
+          result = (exp(x) - exp(-x)) / (exp(x) + exp(-x))
+          return(result)
+        }
+        
+        for(i in 1:nrow(data_vars))
+        {
+          a1 = c(1,data_vars[i,1:10]) # 1X11          
+          z2 = theta1 %*% a1 #5X1          
+          a2 = c(1,tan_sigmoid(z2)) #6X1          
+          z3 = theta2 %*% a2 #1X1          
+          h = tanh(z3)          
+          J = J + (data_vars[i,11] - h)^2          
+          m = m + 1
+              
+          if(learn == 1)  
+          {            
+            delta3 = h - data_vars[i,11]         
+            delta2 = ((t(theta2) %*% delta3) * (a2 * (1 - a2)))[2:6,]             
+            
+            t1_DELTA = t1_DELTA + (matrix(delta2,5,1) %*% matrix(a1,1,11)) 
+            t2_DELTA = t2_DELTA + (delta3 %*% a2) #accumulating errors over each record in batch           
+          }
+          else {
+            print(c("Hypothesis for ",i," is ",abs(h*(maxOpen-minOpen)+minOpen)," actual is ", actualOpen[i,1]))
+          }
+          
+        } # end for
+        
+        # average cost for batch    
+        J = J/-m 
+        
+        if(learn == 1)
+        {
+          theta1 = theta1 - (alpha * (t1_DELTA/m))
+          theta2 = theta2 - (alpha * (t2_DELTA/m))
+        }
+        else{
+          print(c("J: ",J))
+        }
+        
+        theta1_new = theta1;
+        theta2_new = theta2;
+      
+        theta_list <- list(theta1_new,theta2_new,abs(h*(maxOpen-minOpen)+minOpen))
+        return(theta_list)        
+      } # end nse_stock_neural_net()
+
+predict_stock_open_value <- function(ShareName = "Share1",lag=3)
+{        
+share_data_frame = rawdata %>% 
+  select(Share.Names,Date,Prev.Close,High.Price,Low.Price,Last.Price,Close.Price,Average.Price,
+         Total.Traded.Quantity,Turnover.in.Lacs,Deliverable.Qty,X..Dly.Qt.to.Traded.Qty,Open.Price) %>% 
+  filter(Share.Names == ShareName)
+
+share_data_frame_numeric = share_data_frame %>% 
+     select(-Share.Names,-Date)
+      
+  maxOpen = share_data_frame_numeric %>% 
+              select(Open.Price) %>% 
+              apply(2,max)
+  
+  minOpen = share_data_frame_numeric %>% 
+              select(Open.Price) %>% 
+              apply(2,min)
+  
+  actualOpen = as.vector(share_data_frame_numeric %>% 
+                           select(Open.Price))
+      
+  share1_data_scaled = share1_data_frame_numeric %>%       
         mutate(
           x1 = (Prev.Close - min(Prev.Close)) / (max(Prev.Close) - min(Prev.Close)),
           x2 = (High.Price - min(High.Price)) / (max(High.Price) - min(High.Price)),
@@ -56,114 +112,27 @@ predict_stock_open_value <- function(ShareName = "Share1",lag=3)
           x10 = (X..Dly.Qt.to.Traded.Qty - min(X..Dly.Qt.to.Traded.Qty)) / (max(X..Dly.Qt.to.Traded.Qty) - min(X..Dly.Qt.to.Traded.Qty)),
           x11 = (Open.Price - min(Open.Price)) / (max(Open.Price) - min(Open.Price))
         ) %>% 
-        
         select(x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11)
      
-      if(lag == 3){
-              
-              lagged_data <- slide(share1_data_scaled, Var = "x11", slideBy = lag) %>% 
-                             mutate(x11 = x113) %>% 
-                             select(x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11) %>% 
-                             filter(!is.na(x11))
+      if(lag == 3){              
+        lagged_data <- slide(share1_data_scaled, Var = "x11", slideBy = lag) %>% 
+                       mutate(x11 = x113) %>% 
+                       select(-x113) %>% 
+                       filter(!is.na(x11))
       }        
       
-      else if(lag == 4) {
-        
+      else if(lag == 4) {        
         lagged_data <- slide(share1_data_scaled, Var = "x11", slideBy = lag) %>% 
           mutate(x11 = x114) %>% 
-          select(x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11) %>% 
+          select(-x114) %>% 
           filter(!is.na(x11))
       }        
-      
+            
       lagged_data_matrix = data.matrix(lagged_data)
       
-      
-      
-      nse_stock_neural_net <- function(data_vars,theta1,theta2,init_w = 0, learn = 0, alpha = 0.01)
-      {
-        h_values = rep(0,nrow(data_vars))
-        
-        if(init_w == 1)
-        {
-          theta1 = matrix(runif(55,-1,1),5,11)
-          
-          theta2 = matrix(runif(6,-1,1),1,6)
-          
-          
-        }   
-        
-        t1_DELTA = matrix(0,nrow(theta1),ncol(theta1))
-        t2_DELTA = matrix(0,nrow(theta2),ncol(theta2))
-        
-        
-        m = 0
-        J = 0.0
-        
-        
-        
-        tan_sigmoid <- function(x)
-        {
-          result = (exp(x) - exp(-x)) / (exp(x) + exp(-x))
-          return(result)
-        }
-        
-        for(i in 1:nrow(data_vars))
-        {
-          a1 = c(1,data_vars[i,1:10]) # 1X11
-          
-          z2 = theta1 %*% a1 #5X1
-          
-          a2 = c(1,tan_sigmoid(z2)) #6X1
-          
-          z3 = theta2 %*% a2 #1X1
-          
-          h = tanh(z3)
-          
-          J = J + (data_vars[i,11] - h)^2
-          
-          m = m + 1
-          
-          if(learn == 1)  
-          {
-            
-            delta3 = h - data_vars[i,11]
-            delta3
-            delta2 = ((t(theta2) %*% delta3) * (a2 * (1 - a2)))[2:6,] 
-            delta2
-            
-            t1_DELTA = t1_DELTA + (matrix(delta2,5,1) %*% matrix(a1,1,11)) 
-            t2_DELTA = t2_DELTA + (delta3 %*% a2) #accumulating errors
-            
-          }
-          else {
-            print(c("Hypothesis for ",i," is ",abs(h*(maxOpen-minOpen)+minOpen)," actual is ", actualOpen[i,1])) #printed every 1000 runs ie total of 10 times
-            
-          }
-          
-        } # end for
-        
-        J = J/-m # average cost 
-        
-        if(learn == 1)
-        {
-          theta1 = theta1 - (alpha * (t1_DELTA/m))
-          theta2 = theta2 - (alpha * (t2_DELTA/m))
-        }
-        else{
-          print(c("J: ",J))
-        }
-        
-        theta1_new = theta1;
-        theta2_new = theta2;
-        
-        theta_list <- list(theta1_new,theta2_new,abs(h*(maxOpen-minOpen)+minOpen))
-        return(theta_list)
-        
-      } # end function
-      
+      #initialize weights for NN
       theta_list <- nse_stock_neural_net(lagged_data_matrix,theta1,theta2,1,1,0.01)
-      
-      
+    
       for (n in 1:10000)
       {
         theta_list <- nse_stock_neural_net(lagged_data_matrix,theta_list[[1]],theta_list[[2]],0,1,0.01)
@@ -171,24 +140,22 @@ predict_stock_open_value <- function(ShareName = "Share1",lag=3)
         if (n%%10 == 0){
           print("Neural Network Output----------------------------------------------------------------------------------")
           print(c("Iteration : ",n))
-          theta_list <- nse_stock_neural_net(lagged_data_matrix,theta_list[[1]],theta_list[[2]])
-          
+          theta_list <- nse_stock_neural_net(lagged_data_matrix,theta_list[[1]],theta_list[[2]])       
         }
         n = n + 1
       }
       
-      prediction_data = share1_data_scaled[nrow(share1_data_scaled),] #last row is values on 15 May
-                       
-      
+      #last row is values on 15 May
+      prediction_data = share_data_scaled[nrow(share_data_scaled),] 
+                             
       prediction_data_matrix = data.matrix(prediction_data)
       
       theta_list <- nse_stock_neural_net(prediction_data_matrix,theta_list[[1]],theta_list[[2]])
       
       return(theta_list[[3]])
-}
+} #end predict_stock_open_value
 
 # lag = +3 for 18 May and = +4 for 19 May
-
 
 open_value_18_19 = rep(0,100)
 share_name = rep("X",100)
@@ -206,7 +173,6 @@ else{
   open_value_18_19[2*x+1] = predict_stock_open_value(paste("Share",x+1,sep=""),3)
   open_value_18_19[2*x+2] = predict_stock_open_value(paste("Share",x+1,sep=""),4)
 }
-
   x = x + 1
 }
 
