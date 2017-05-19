@@ -171,7 +171,7 @@ for(x in 0:49)
   }
   else{
     print("-------")
-    print(paste("Share",x))
+    print(paste("Share",x+1))
     open_value_18_19[2*x+1] = predict_stock_open_value(paste("Share",x+1,sep=""),3)
     open_value_18_19[2*x+2] = predict_stock_open_value(paste("Share",x+1,sep=""),4)
   }
